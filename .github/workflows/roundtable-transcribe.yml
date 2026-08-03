@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SOURCE_URL: https://drive.google.com/file/d/1kmJBGGt43CAXqCEhjtwGcarg-RnM_5pa/view?usp=drive_link
+  SOURCE_FILE_ID: 1kmJBGGt43CAXqCEhjtwGcarg-RnM_5pa
   MODEL_URL: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin
   WHISPER_URL: https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-bin-ubuntu-x64.tar.gz
   CHUNK_SECONDS: 3600
@@ -40,7 +40,7 @@ jobs:
 
       - name: Download original source
         run: |
-          ~/.local/bin/gdown --fuzzy "$SOURCE_URL" -O source.mp4
+          ~/.local/bin/gdown "$SOURCE_FILE_ID" -O source.mp4
           test "$(stat -c%s source.mp4)" -gt 300000000
           ffprobe -v error -show_entries format=duration -of default=nw=1 source.mp4
 
