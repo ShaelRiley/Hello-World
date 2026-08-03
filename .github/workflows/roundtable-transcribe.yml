@@ -1,13 +1,17 @@
 name: Roundtable transcription
 
 on:
-  push:
+  pull_request:
     branches:
-      - roundtable-transcription-2026-07-25
+      - master
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: roundtable-transcription-2026-07-25
+  cancel-in-progress: true
 
 env:
   SOURCE_URL: https://drive.google.com/file/d/1kmJBGGt43CAXqCEhjtwGcarg-RnM_5pa/view?usp=drive_link
