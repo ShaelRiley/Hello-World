@@ -1,0 +1,96 @@
+name: Roundtable transcription
+
+on:
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: roundtable-transcription-2026-07-25
+  cancel-in-progress: true
+
+env:
+  SOURCE_FILE_ID: 1kmJBGGt43CAXqCEhjtwGcarg-RnM_5pa
+  MODEL_URL: https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin
+  WHISPER_URL: https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-bin-ubuntu-x64.tar.gz
+  CHUNK_SECONDS: 3600
+  OVERLAP_SECONDS: 20
+
+jobs:
+  transcribe:
+    name: Transcribe chunk ${{ matrix.chunk }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        chunk: [0, 1, 2, 3, 4, 5]
+
+    steps:
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg curl python3-pip
+          python3 -m pip install --user --quiet gdown
+
+      - name: Download original source
+        run: |
+          ~/.local/bin/gdown "$SOURCE_FILE_ID" -O source.mp4
+          test "$(stat -c%s source.mp4)" -gt 300000000
+          ffprobe -v error -show_entries format=duration -of default=nw=1 source.mp4
+
+      - name: Download whisper.cpp and model
+        run: |
+          curl -L --fail --retry 5 --retry-delay 3 "$WHISPER_URL" -o whisper.tar.gz
+          mkdir whisper-bin
+          tar -xzf whisper.tar.gz -C whisper-bin
+          WHISPER_CLI=$(find whisper-bin -type f -name whisper-cli | head -1)
+          test -n "$WHISPER_CLI"
+          chmod +x "$WHISPER_CLI"
+          echo "WHISPER_CLI=$WHISPER_CLI" >> "$GITHUB_ENV"
+          curl -L --fail --retry 5 --retry-delay 5 "$MODEL_URL" -o model.bin
+          test "$(stat -c%s model.bin)" -gt 500000000
+
+      - name: Extract overlapping WAV chunk
+        run: |
+          IDX=${{ matrix.chunk }}
+          NOMINAL_START=$((IDX * CHUNK_SECONDS))
+          if [ "$IDX" -eq 0 ]; then
+            START=0
+          else
+            START=$((NOMINAL_START - OVERLAP_SECONDS))
+          fi
+          DURATION=$((CHUNK_SECONDS + 2 * OVERLAP_SECONDS))
+          ffmpeg -hide_banner -loglevel error -ss "$START" -i source.mp4 -t "$DURATION" \
+            -vn -ac 1 -ar 16000 -c:a pcm_s16le chunk.wav
+          printf '{"chunk":%s,"start":%s,"nominal_start":%s,"nominal_end":%s,"overlap":%s}\n' \
+            "$IDX" "$START" "$NOMINAL_START" "$((NOMINAL_START + CHUNK_SECONDS))" "$OVERLAP_SECONDS" > chunk-meta.json
+
+      - name: Transcribe accurately
+        run: |
+          mkdir output
+          "$WHISPER_CLI" \
+            -m model.bin \
+            -f chunk.wav \
+            -l en \
+            -t "$(nproc)" \
+            -fa \
+            -osrt -otxt -oj -ojf \
+            -of "output/chunk_${{ matrix.chunk }}" \
+            --prompt "Basic Income Roundtable. Basically Income PAC. Universal basic income. UBI. Clubhouse. Public policy. Political economy." \
+            -pp 2>&1 | tee "output/chunk_${{ matrix.chunk }}.log"
+          cp chunk-meta.json output/
+          ls -lh output
+
+      - name: Upload transcript chunk
+        uses: actions/upload-artifact@v4
+        with:
+          name: roundtable-transcript-chunk-${{ matrix.chunk }}
+          path: output/
+          if-no-files-found: error
+          retention-days: 7
